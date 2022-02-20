@@ -187,6 +187,41 @@ fn single_line_highlight() -> Result<(), MietteError> {
 }
 
 #[test]
+fn external_source() -> Result<(), MietteError> {
+    #[derive(Debug, Diagnostic, Error)]
+    #[error("oops!")]
+    #[diagnostic(code(oops::my::bad), help("try doing it better next time?"))]
+    struct MyBad {
+        #[label("this bit here")]
+        highlight: SourceSpan,
+    }
+
+    let src = "source\n  text\n    here".to_string();
+    let err = Report::from(MyBad {
+        highlight: (9, 4).into(),
+    })
+    .with_source_code(NamedSource::new("bad_file.rs", src));
+    let out = fmt_report(err);
+    println!("Error: {}", out);
+    let expected = r#"oops::my::bad
+
+  × oops!
+   ╭─[bad_file.rs:1:1]
+ 1 │ source
+ 2 │   text
+   ·   ──┬─
+   ·     ╰── this bit here
+ 3 │     here
+   ╰────
+  help: try doing it better next time?
+"#
+    .trim_start()
+    .to_string();
+    assert_eq!(expected, out);
+    Ok(())
+}
+
+#[test]
 fn single_line_highlight_offset_zero() -> Result<(), MietteError> {
     #[derive(Debug, Diagnostic, Error)]
     #[error("oops!")]
@@ -779,6 +814,66 @@ Error: oops::my::bad
    ╰────
   help: try doing it better next time?
 
+"#
+    .trim_start()
+    .to_string();
+    assert_eq!(expected, out);
+    Ok(())
+}
+
+#[test]
+fn related_source_code_propagation() -> Result<(), MietteError> {
+    #[derive(Debug, Diagnostic, Error)]
+    #[error("oops!")]
+    #[diagnostic(code(oops::my::bad), help("try doing it better next time?"))]
+    struct MyBad {
+        #[source_code]
+        src: NamedSource,
+        #[label("this bit here")]
+        highlight: SourceSpan,
+        #[related]
+        related: Vec<InnerError>,
+    }
+
+    #[derive(Debug, Diagnostic, Error)]
+    #[error("oops!")]
+    #[diagnostic(code(oops::my::bad))]
+    struct InnerError {
+        #[label("this bit here")]
+        highlight: SourceSpan,
+    }
+
+    let src = "source\n  text\n    here".to_string();
+    let err = MyBad {
+        src: NamedSource::new("bad_file.rs", src.clone()),
+        highlight: (9, 4).into(),
+        related: vec![InnerError {
+            highlight: (0, 6).into(),
+        }],
+    };
+    let out = fmt_report(err.into());
+    println!("Error: {}", out);
+    let expected = r#"oops::my::bad
+
+  × oops!
+   ╭─[bad_file.rs:1:1]
+ 1 │ source
+ 2 │   text
+   ·   ──┬─
+   ·     ╰── this bit here
+ 3 │     here
+   ╰────
+  help: try doing it better next time?
+
+Error: oops::my::bad
+
+  × oops!
+   ╭─[bad_file.rs:1:1]
+ 1 │ source
+   · ───┬──
+   ·    ╰── this bit here
+ 2 │   text
+   ╰────
 "#
     .trim_start()
     .to_string();
